@@ -47,11 +47,11 @@ class TestAngularSep:
 
 class TestWatchTarget:
     def test_match_with_flare(self, monkeypatch):
-        monkeypatch.setattr(broker, "cone_search", lambda ra, dec, r: [
+        monkeypatch.setattr(broker, "cone_search", lambda ra, dec, r, survey=None: [
             {"object_id": "ZTFfake1", "ra": ra, "dec": dec,
              "n_det": 40, "first_mjd": 60000.0, "last_mjd": 60040.0}])
         monkeypatch.setattr(broker, "get_lightcurve",
-                            lambda oid: fake_lightcurve(flare_at=20))
+                            lambda oid, survey=None: fake_lightcurve(flare_at=20))
         card = watch_target(make_target())
         assert card["status"] == "ok"
         assert card["object_id"] == "ZTFfake1"
@@ -59,13 +59,13 @@ class TestWatchTarget:
         assert card["n_flare_candidates"] == 1
 
     def test_no_match(self, monkeypatch):
-        monkeypatch.setattr(broker, "cone_search", lambda ra, dec, r: [])
+        monkeypatch.setattr(broker, "cone_search", lambda ra, dec, r, survey=None: [])
         card = watch_target(make_target())
         assert card["status"] == "no_match"
         assert card["object_id"] is None
 
     def test_picks_nearest_match(self, monkeypatch):
-        def two_matches(ra, dec, r):
+        def two_matches(ra, dec, r, survey=None):
             return [
                 {"object_id": "far", "ra": ra + 0.001, "dec": dec,
                  "n_det": 5, "first_mjd": None, "last_mjd": None},
@@ -74,14 +74,14 @@ class TestWatchTarget:
             ]
         monkeypatch.setattr(broker, "cone_search", two_matches)
         monkeypatch.setattr(broker, "get_lightcurve",
-                            lambda oid: fake_lightcurve())
+                            lambda oid, survey=None: fake_lightcurve())
         card = watch_target(make_target())
         assert card["object_id"] == "near"
 
     def test_position_propagated(self, monkeypatch):
         seen = {}
 
-        def capture(ra, dec, r):
+        def capture(ra, dec, r, survey=None):
             seen["ra"], seen["dec"], seen["radius"] = ra, dec, r
             return []
 
@@ -99,7 +99,7 @@ class TestRunWatch:
     def test_failure_does_not_kill_run(self, monkeypatch, tmp_path):
         calls = {"n": 0}
 
-        def flaky(ra, dec, r):
+        def flaky(ra, dec, r, survey=None):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise RuntimeError("broker down")
@@ -113,11 +113,11 @@ class TestRunWatch:
         assert summary["n_no_match"] == 1
 
     def test_reports_written(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(broker, "cone_search", lambda ra, dec, r: [
+        monkeypatch.setattr(broker, "cone_search", lambda ra, dec, r, survey=None: [
             {"object_id": "ZTFfake1", "ra": ra, "dec": dec,
              "n_det": 40, "first_mjd": None, "last_mjd": None}])
         monkeypatch.setattr(broker, "get_lightcurve",
-                            lambda oid: fake_lightcurve(flare_at=10))
+                            lambda oid, survey=None: fake_lightcurve(flare_at=10))
         summary = run_watch([make_target(source_id="xyz")],
                             output_dir=tmp_path)
         card = json.loads((tmp_path / "target_xyz.json").read_text())
@@ -126,3 +126,33 @@ class TestRunWatch:
         loaded = json.loads((tmp_path / "summary.json").read_text())
         assert loaded == summary
         assert summary["targets_with_candidates"] == ["xyz"]
+
+
+class TestSurveyEpochs:
+    def test_lsst_propagation_and_radius(self, monkeypatch):
+        seen = {}
+
+        def capture(ra, dec, r, survey=None):
+            seen["dec"], seen["radius"], seen["survey"] = dec, r, survey
+            return []
+
+        monkeypatch.setattr(broker, "cone_search", capture)
+        t = make_target(pmra_mas_yr=0.0, pmdec_mas_yr=1000.0)
+        card = watch_target(t, survey="lsst")
+        assert card["survey"] == "lsst"
+        assert seen["survey"] == "lsst"
+        # mid-epoch 2026.55, dt = 10.55 yr at 1 arcsec/yr
+        assert seen["dec"] == pytest.approx(
+            t["dec"] + 10.55 / 3600.0, abs=1e-5)
+        # survey span is days: radius is essentially the base 2 arcsec
+        assert seen["radius"] == pytest.approx(2.05, abs=0.01)
+
+    def test_output_dir_per_survey(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(broker, "cone_search",
+                            lambda ra, dec, r, survey=None: [])
+        monkeypatch.setattr(watch, "OUTPUT_DIR", tmp_path)
+        run_watch([make_target(source_id="s1")], survey="lsst")
+        assert (tmp_path / "lsst" / "summary.json").exists()
+        summary = json.loads(
+            (tmp_path / "lsst" / "summary.json").read_text())
+        assert summary["survey"] == "lsst"

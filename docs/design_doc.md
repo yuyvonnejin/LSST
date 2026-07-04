@@ -172,10 +172,18 @@ Network (marked `@pytest.mark.network`, run manually):
 
 ## 7. Milestones
 
-1. v1 (this session): modules + offline tests green + live smoke of
-   the ZTF path end to end on a handful of targets.
-2. Point broker client at ALeRCE/Fink Rubin endpoints as they are
-   published; first Rubin-based target scorecards.
+1. v1 (done 2026-07-03): modules + offline tests green + live smoke
+   of the ZTF path end to end on a handful of targets.
+2. Rubin backend (done 2026-07-04): ALeRCE multisurvey API
+   (https://api-lsst.alerce.online/) verified live with real Rubin
+   alerts. broker.py is survey-parametrized ("ztf" | "lsst");
+   watch.py takes --survey with per-survey epochs and output dirs.
+   LSST specifics handled: numeric oids, cone-search rows duplicated
+   per classifier ranking (deduped), detections as fluxes in nJy
+   (scienceFlux = total brightness -> AB mag, m = -2.5 log10(f) +
+   31.4; psfFlux is difference-image flux and not used for flare
+   amplitude), 6-band map from payload, isNegative / ssObjectId /
+   non-positive-flux rows skipped.
 3. Flare rates per target normalized by exposure (epochs, baseline
    span); compare northern (ZTF) vs southern (LSST-only) samples.
 4. Optional: energy calibration, streaming ingestion, candidate

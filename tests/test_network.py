@@ -28,3 +28,20 @@ def test_gaia_tap_live():
     rows = query_gaia(build_adql(limit=20))
     assert rows
     assert any(passes_cuts(r) for r in rows)
+
+
+def test_alerce_lsst_cone_search_live():
+    # position of a real Rubin alert captured 2026-07-04
+    objs = cone_search(305.5822, -18.7909, 30.0, survey="lsst")
+    assert objs
+    assert isinstance(objs[0]["object_id"], int)
+
+
+def test_alerce_lsst_lightcurve_live():
+    objs = cone_search(305.5822, -18.7909, 30.0, survey="lsst")
+    dets = get_lightcurve(objs[0]["object_id"], survey="lsst")
+    assert isinstance(dets, list)
+    for d in dets:
+        assert d["mjd"] > 61000
+        assert 5 < d["mag"] < 30
+        assert d["band"] in ("u", "g", "r", "i", "z", "y")

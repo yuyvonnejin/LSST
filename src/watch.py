@@ -8,6 +8,10 @@ For each target from data/targets.json:
 5. Write one scorecard per target + a survey summary JSON.
 
 One target failing never kills the run.
+
+Backends (--survey): "ztf" (long baseline, northern sky) and "lsst"
+(live Rubin alerts since 2026-06-30; sparse at first, deepens nightly
+and covers the south where ZTF cannot match).
 """
 
 import argparse
@@ -25,15 +29,26 @@ logger = logging.getLogger(__name__)
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
 
-# ZTF started 2018.2; use its mid-epoch for position propagation.
-# For a Rubin backend this becomes ~2026.7 onward.
-SURVEY_START_YEAR = 2018.2
-SURVEY_END_YEAR = 2026.5
+# (start_year, end_year) of usable alert coverage, for proper-motion
+# propagation and drift margin. LSST end year is a moving "now";
+# nudge forward occasionally (a few months of error is < 1 arcsec of
+# drift even at Barnard-star proper motion).
+SURVEY_EPOCHS = {
+    "ztf": (2018.2, 2026.5),
+    "lsst": (2026.5, 2026.6),
+}
 
 BASE_RADIUS_ARCSEC = 2.0
 
 
-def search_radius_arcsec(target, mid_epoch_dt, half_span_years):
+def survey_epochs(survey):
+    start, end = SURVEY_EPOCHS[survey]
+    mid = 0.5 * (start + end)
+    half_span = 0.5 * (end - start)
+    return mid, half_span
+
+
+def search_radius_arcsec(target, half_span_years):
     """Base match radius plus proper-motion drift over half the survey."""
     drift = pm_drift_arcsec(target.get("pmra_mas_yr"),
                             target.get("pmdec_mas_yr"),
@@ -49,20 +64,19 @@ def angular_sep_arcsec(ra1, dec1, ra2, dec2):
     return math.hypot(dra, ddec) * 3600.0
 
 
-def watch_target(target, survey_start=SURVEY_START_YEAR,
-                 survey_end=SURVEY_END_YEAR):
+def watch_target(target, survey="ztf"):
     """Run the full chain for one target. Returns a scorecard dict."""
-    mid_epoch = 0.5 * (survey_start + survey_end)
-    half_span = 0.5 * (survey_end - survey_start)
+    mid_epoch, half_span = survey_epochs(survey)
     dt = mid_epoch - GAIA_EPOCH
 
     ra, dec = propagate_position(
         target["ra"], target["dec"],
         target.get("pmra_mas_yr"), target.get("pmdec_mas_yr"), dt)
-    radius = search_radius_arcsec(target, dt, half_span)
+    radius = search_radius_arcsec(target, half_span)
 
     card = {
         "source_id": target["source_id"],
+        "survey": survey,
         "distance_pc": target.get("distance_pc"),
         "g_mag": target.get("g_mag"),
         "search_ra": round(ra, 6),
@@ -76,7 +90,7 @@ def watch_target(target, survey_start=SURVEY_START_YEAR,
         "n_flare_candidates": 0,
     }
 
-    matches = broker.cone_search(ra, dec, radius)
+    matches = broker.cone_search(ra, dec, radius, survey=survey)
     if not matches:
         return card
 
@@ -86,7 +100,7 @@ def watch_target(target, survey_start=SURVEY_START_YEAR,
     card["match_sep_arcsec"] = round(
         angular_sep_arcsec(ra, dec, best["ra"], best["dec"]), 2)
 
-    detections = broker.get_lightcurve(best["object_id"])
+    detections = broker.get_lightcurve(best["object_id"], survey=survey)
     card["n_detections"] = len(detections)
     card["bands"] = analyze_by_band(detections)
     card["n_flare_candidates"] = sum(
@@ -95,17 +109,19 @@ def watch_target(target, survey_start=SURVEY_START_YEAR,
     return card
 
 
-def run_watch(targets, output_dir=OUTPUT_DIR):
+def run_watch(targets, survey="ztf", output_dir=None):
     """Watch every target; write per-target cards and a summary."""
+    if output_dir is None:
+        output_dir = OUTPUT_DIR / survey
     output_dir.mkdir(parents=True, exist_ok=True)
     cards = []
     for t in targets:
         sid = t["source_id"]
         try:
-            card = watch_target(t)
+            card = watch_target(t, survey=survey)
         except Exception:
             logger.exception("target %s failed", sid)
-            card = {"source_id": sid, "status": "error"}
+            card = {"source_id": sid, "survey": survey, "status": "error"}
         cards.append(card)
         logger.info("%-22s %-10s det=%-5s flare_candidates=%s",
                     sid, card["status"], card.get("n_detections", "-"),
@@ -114,6 +130,7 @@ def run_watch(targets, output_dir=OUTPUT_DIR):
             json.dump(card, f, indent=1)
 
     summary = {
+        "survey": survey,
         "n_targets": len(cards),
         "n_ok": sum(1 for c in cards if c["status"] == "ok"),
         "n_no_match": sum(1 for c in cards if c["status"] == "no_match"),
@@ -134,6 +151,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="Broker alert watch over nearby M dwarf targets")
     parser.add_argument("--targets-file", default=str(TARGETS_FILE))
+    parser.add_argument("--survey", choices=sorted(broker.SURVEYS),
+                        default="ztf")
     parser.add_argument("--limit", type=int, default=None,
                         help="watch only the first N targets")
     args = parser.parse_args()
@@ -142,7 +161,7 @@ def main():
     targets = load_targets(args.targets_file)
     if args.limit:
         targets = targets[:args.limit]
-    run_watch(targets)
+    run_watch(targets, survey=args.survey)
 
 
 if __name__ == "__main__":

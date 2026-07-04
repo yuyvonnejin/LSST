@@ -57,12 +57,20 @@ python -m venv venv
 # Build the target catalog (live Gaia TAP query, ~30 s)
 ./venv/Scripts/python.exe -m src.targets
 
-# Watch targets against the broker (live, ~2 s/target)
-./venv/Scripts/python.exe -m src.watch --limit 20
+# Watch targets against ZTF alerts (long baseline, northern sky)
+./venv/Scripts/python.exe -m src.watch --survey ztf --limit 20
+
+# Watch targets against live Rubin/LSST alerts
+./venv/Scripts/python.exe -m src.watch --survey lsst --limit 20
 
 # Custom target file
 ./venv/Scripts/python.exe -m src.watch --targets-file data/targets.json
 ```
+
+Output goes to `output/<survey>/`. The two backends share one schema
+downstream: LSST detections arrive as fluxes (nJy) and are converted
+to AB magnitudes (from scienceFlux, the star's total brightness;
+difference-image psfFlux is not used for flare amplitudes).
 
 Reading the output:
 - `status: ok` -- broker object matched, light curve analyzed.
@@ -89,11 +97,14 @@ light curves (quiet null, single/multi-epoch injection, dimming
 rejection, grouping), watch orchestration with mocked broker
 (match/no-match/error paths, report writing).
 
-## Status (2026-07-03)
+## Status (2026-07-04)
 
-- Offline suite green (48 passed), live smoke tests green.
-- End-to-end validated on ZTF: target catalog built (2000 nearest
-  M dwarfs), live watch run matches broker objects and analyzes
-  light curves.
-- Waiting on: public ALeRCE/Fink LSST endpoint documentation to point
-  `broker.BASE_URL` at Rubin alerts.
+- Offline suite green (60 passed), live smoke tests green (ZTF,
+  LSST, Gaia TAP).
+- End-to-end validated on ZTF: 80-target live run, 39 matched,
+  0 errors, honest nulls.
+- Rubin backend live: ALeRCE multisurvey API serves real LSST alerts
+  (first alerts from 2026-07-02 retrieved and parsed). Full-catalog
+  Rubin run results in output/lsst/summary.json. Expect mostly
+  no_match for months: the survey is days old and alerts only exist
+  where difference imaging fired; coverage deepens nightly.
