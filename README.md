@@ -81,6 +81,19 @@ Reading the output:
 - `bands.<b>.status: insufficient_data` -- fewer than 10 detections
   in that band; no flare statistics are fabricated from it.
 
+## Rerunning and scheduled runs
+
+- Interactive: type `/watch-run` in a Claude Code session in this
+  folder. Runs the survey, archives the previous summary, reports
+  what changed (new matches, new candidates, coverage growth).
+- Scheduled: Windows Task Scheduler task `lsst_watch_weekly`
+  (Mondays 09:37, runs later if the PC was off) executes
+  `scripts/weekly_watch.ps1`: archives the previous summary to
+  `output/history/`, runs the full-catalog LSST survey, then writes a
+  Claude-generated delta report to `logs/report_<date>.md`.
+  Manage with: `schtasks /query /tn lsst_watch_weekly`,
+  `/run` to trigger now, `/delete` to remove.
+
 ## Tests
 
 ```
